@@ -74,10 +74,10 @@ def expmc(x, c = 0):
 
 
 
-def preprocess(raw_data, fs =1000, eeg_fs = 1000, extract_mode = 'others', rmline = True, use_fft = False, fft_size = 50, hg = slice(70, 170), lf = slice(10, 50), pad = True, doub_pad = True, post_pad = True, log_c = 0, diff = True, diff_order = 2, norm_mode = 'running', norm_blockwise = False, norm_win = 10, apply_CAR = False, detrend = False):
+def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, extract_mode = 'others', rmline = True, use_fft = False, fft_size = 50, hg = slice(70, 170), lf = slice(10, 50), pad = True, doub_pad = True, post_pad = True, log_c = 0, diff = True, diff_order = 2, norm_mode = 'running', norm_blockwise = False, norm_win = 10, apply_CAR = False, detrend = False):
     # change input data into an xarray with time and channel dimension
-    times = list(range(10000))
-    channels = list(range(64))
+    times = list(range(element_count))
+    channels = list(range(channel_count))
     raw_data = xr.DataArray(raw_data, dims = ['time','channel'], coords = {'time': times, 'channel': channels, 'fs':1000})
     
     #Spectral parameters
