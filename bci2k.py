@@ -7,6 +7,8 @@ import struct
 
 import numpy as np
 
+import preprocess
+
 
 class DataView:
     def __init__(self, array, bytes_per_element=1):
@@ -62,6 +64,7 @@ async def BCI2K_DataConnection(endpoint):
         print("")
         data = await websocket.recv()
         dv = DataView(data)
+        run_count = 1
         if data[0] == 4:  # Visualization and Brain Signal Data Format
             if data[1] == 1:  # Signal
                 if(data[2] == 2):  # float32
@@ -73,17 +76,30 @@ async def BCI2K_DataConnection(endpoint):
                     element_count = data[5]
                     print("Number of elements: {}".format(element_count))
                     # print(data[6])  # + 256 elements
-
+                    
+                    datastream_buffer = []
+                    if not run_count:
+                        datastream_buffer = datastream # most recent batch
+                        run_count = 0
                     datastream = []
                     for ii in range(channel_count*element_count):
-                        # TODO: write this function directly in get_float_32?
                         datastream.append(dv.get_float_32(7+ii))
 
                     datastream = np.array(datastream).reshape(
-                        channel_count, element_count)
-                    # TODO: integrate datastream into preprocessing and feed it to model
+                        channel_count, element_count)                    
+                    
+                    # TODO: feed it to model
                     print('datastream')
                     print(datastream)
+                    np.save('datastream.npy', datastream)
+                    
+                    if datastream_buffer == []:
+                        processed = preprocess.preprocess(datastream.T, channel_count)
+                    else:
+                        processed = preprocess.preprocess(
+                            np.concatenate((datastream_buffer,datastream),axis=1).T, channel_count)
+                    print('processed')
+                    print(processed)
 
 
 while True:

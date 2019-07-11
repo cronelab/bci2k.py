@@ -12,14 +12,18 @@ np.mode = lambda x, axis = None: np.apply_along_axis(lambda x: np.argmax(np.binc
 eps = 1e-9
 log_eps = np.log(np.finfo(np.float64).eps)
 import scipy
-import scipy.io
-import scipy.io.wavfile
+import scipy.io as sio
+import scipy.io.wavfile as wav
+import scipy.signal
 import sympy
 from fractions import Fraction
 import h5py
 import mne
+from mne.filter import filter_data
 import matplotlib
 from matplotlib import pyplot as plt
+import sys
+sys.path.insert(0, "..")
 from ecogpy.python.pbar import pbar
 from ecogpy.python.h5eeg import H5EEGFile
 import xarray as xr
@@ -30,21 +34,14 @@ import xarray as xr
 
 
 # Densenet
-import numpy as np 
-from mne.filter import filter_data
 import pyedflib
-import scipy.io.wavfile as wav
-import scipy
-import scipy.signal
-import MelFilterBank as mel
-import matplotlib.pyplot as plt
-import scipy.io as sio
+#import MelFilterBank as mel
 from scipy.stats import mode
-import os
 import librosa
 import lws
 import librosa.filters
 import math
+
 
 
 # Define lower-level functions
@@ -74,8 +71,9 @@ def expmc(x, c = 0):
 
 
 
-def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, extract_mode = 'others', rmline = True, use_fft = False, fft_size = 50, hg = slice(70, 170), lf = slice(10, 50), pad = True, doub_pad = True, post_pad = True, log_c = 0, diff = True, diff_order = 2, norm_mode = 'running', norm_blockwise = False, norm_win = 10, apply_CAR = False, detrend = False):
+def preprocess(raw_data, channel_count, fs =1000, eeg_fs = 1000, extract_mode = 'others', rmline = True, use_fft = False, fft_size = 50, hg = slice(70, 170), lf = slice(10, 50), pad = True, doub_pad = False, post_pad = False, log_c = 0, diff = False, diff_order = 2, norm_mode = 'overall', norm_blockwise = False, norm_win = 1, apply_CAR = False, detrend = False):
     # change input data into an xarray with time and channel dimension
+    element_count = np.shape(raw_data)[0]
     times = list(range(element_count))
     channels = list(range(channel_count))
     raw_data = xr.DataArray(raw_data, dims = ['time','channel'], coords = {'time': times, 'channel': channels, 'fs':1000})
@@ -91,22 +89,22 @@ def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, 
         'noverlap': int(fft_size - fft_shift)
     }
 
-    diff_win = fft_size/2/eeg_fs/1e3 # ms
-    diff_win = diff_win*1e3
-    norm_win = int(norm_win*1000/fft_shift)
+#     diff_win = fft_size/2/eeg_fs/1e3 # ms
+#     diff_win = diff_win*1e3
+    #norm_win = int(norm_win*1000/fft_shift)
 
 
     # Adaptative CAR if needed
-    if apply_CAR:
-        raw_data = xcog.pipeline.adaptive_CAR(raw_data)
+#     if apply_CAR:
+#         raw_data = xcog.pipeline.adaptive_CAR(raw_data)
 
-    # Detrend signal if needed
-    if detrend:
-        if block_trans_time:
-            bp = block_trans_time
-        else:
-            bp = 0
-        raw_data = xcog.pipeline.detrend(raw_data, bp = bp)
+#     # Detrend signal if needed
+#     if detrend:
+#         if block_trans_time:
+#             bp = block_trans_time
+#         else:
+#             bp = 0
+#         raw_data = xcog.pipeline.detrend(raw_data, bp = bp)
 
     # Filter line noise including harmonics if needed
     if rmline:
@@ -127,19 +125,19 @@ def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, 
         raw_data_ext = raw_data
         trange = None
 
-    # Get trial correspondences of block transitions
-    if extract_mode == 'trial':
-        block_trans = [[]]*len(block_trans_time)
-        for i in range(len(block_trans_time)):
-            block_trans[i] = np.where(np.array([t/eeg_fs for _, t, _ in trial_events]) < block_trans_time[i])[0][-1] + 2
-    elif extract_mode == 'word':
-        block_trans = [[]]*len(block_trans_time)
-        for i in range(len(block_trans_time)):
-            block_trans[i] = np.where(np.array([t/eeg_fs for _, t, _ in word_trial_events]) < block_trans_time[i])[0][-1] + 2
-    elif extract_mode == 'phone':
-        block_trans = [[]]*len(block_trans_time)
-        for i in range(len(block_trans_time)):
-            block_trans[i] = np.where(np.array([t/eeg_fs for _, t, _ in phone_trial_events]) < block_trans_time[i])[0][-1] + 2
+#     # Get trial correspondences of block transitions
+#     if extract_mode == 'trial':
+#         block_trans = [[]]*len(block_trans_time)
+#         for i in range(len(block_trans_time)):
+#             block_trans[i] = np.where(np.array([t/eeg_fs for _, t, _ in trial_events]) < block_trans_time[i])[0][-1] + 2
+#     elif extract_mode == 'word':
+#         block_trans = [[]]*len(block_trans_time)
+#         for i in range(len(block_trans_time)):
+#             block_trans[i] = np.where(np.array([t/eeg_fs for _, t, _ in word_trial_events]) < block_trans_time[i])[0][-1] + 2
+#     elif extract_mode == 'phone':
+#         block_trans = [[]]*len(block_trans_time)
+#         for i in range(len(block_trans_time)):
+#             block_trans[i] = np.where(np.array([t/eeg_fs for _, t, _ in phone_trial_events]) < block_trans_time[i])[0][-1] + 2
 
     # Extract spectrogram
     if use_fft:
@@ -153,7 +151,7 @@ def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, 
         tf_data = xcog.pipeline.bandpass_filterbank(raw_data, nbands = int(fft_size//2 + 1), frange = [0, int(eeg_fs/2)],
                                                     tpad = tpad)
         tf_data = xcog.pipeline.rolling_transform(lambda x: logpc( np.mean(np.square(x), axis = 0), c = 0), tf_data,
-                                                fft_size, stride = fft_shift, pad = True)
+                                                fft_size, stride = fft_shift, pad = True, post_pad = False)
     tf_data.values[np.isnan(tf_data.values)] = log_eps
     tf_data.values[np.isinf(tf_data.values)] = log_eps
 
@@ -204,7 +202,7 @@ def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, 
             tpad = 0
         hg_data = xcog.pipeline.bandpass_filterbank(raw_data, bands = [hg.start, hg.stop], tpad = tpad)
         hg_data = xcog.pipeline.rolling_transform(lambda x: logpc( np.mean(np.square(x), axis = 0), c = 0), hg_data,
-                                                fft_size, stride = fft_shift, pad = True)
+                                                fft_size, stride = fft_shift, pad = True, post_pad = False)
     if norm_blockwise and block_trans_time:
         hg_tmp = [[]]*(len(block_trans) + 1)
         if norm_mode == 'global':
@@ -252,7 +250,7 @@ def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, 
             tpad = 0
         lf_data = xcog.pipeline.bandpass_filterbank(raw_data, bands = [lf.start, lf.stop], tpad = tpad)
         lf_data = xcog.pipeline.rolling_transform(lambda x: logpc( np.mean(np.square(x), axis = 0), c = 0), lf_data,
-                                                fft_size, stride = fft_shift, pad = True)
+                                                fft_size, stride = fft_shift, pad = True, post_pad = False)
     if norm_blockwise and block_trans_time:
         lf_tmp = [[]]*(len(block_trans) + 1)
         if norm_mode == 'global':
@@ -289,12 +287,12 @@ def preprocess(raw_data, channel_count, element_count, fs =1000, eeg_fs = 1000, 
         lf_data = xr.concat(lf_tmp, dim = 'trial')
     elif norm_mode == 'overall':
         lf_data = xr.concat(lf_tmp, dim = 'time')
-    return tf_data 
+    return tf_data[2:7]
 
 
 
 
-
+## changes been made to rolling transform post_pad parameter, consider changing it
 
 
 
