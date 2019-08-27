@@ -1,20 +1,20 @@
-import asyncio
-import websockets
+###################################################################################
+# A BCI2k connector
+# Dummy consumer, recommend multiprocessing.queue for 
+# shared memory b/w producer and consumer (websocket _app.py modification needed)
+###################################################################################
 
-
+import multiprocessing
 from functools import reduce
 import struct
-
+import websocket
 import numpy as np
-
-import preprocess
-
 
 class DataView:
     def __init__(self, array, bytes_per_element=1):
         """
         bytes_per_element is the size of each element in bytes.
-        By default we are assume the array is one byte per element.
+        By default we are assuming the array is one byte per element.
         """
         self.array = array
         self.bytes_per_element = 1
@@ -42,67 +42,49 @@ class DataView:
         binary = self.__get_binary(start_index, bytes_to_read)
         return struct.unpack('<f', binary)[0]  # <f for little endian
 
+def on_message(ws, data):
+    dv = DataView(data)
+    freq_count = 13
+    if data[0] == 4:  # Visualization and Brain Signal Data Format
+        if data[1] == 1:  # Signal
+            if(data[2] == 2):  # float32
+                # number of channels
+                channel_count = data[3] + data[4]*256
+                print("Number of channels: {}".format(channel_count))
+                # number of elements
+                element_count = data[5] + data[6]*256
+                print("Number of elements: {}".format(element_count))
 
-async def BCI2K_OperatorConnection():
-    async with websockets.connect('ws://localhost:80') as websocket:
-        websocket.send('Get Parameter SystemState')
-        systemState = await websocket.recv()
-        print(systemState)
+                datastream = []
+                for ii in range(channel_count*element_count):
+                    datastream.append(dv.get_float_32(7+ii)) 
 
+                datastream = np.swapaxes(np.swapaxes(np.array(datastream).reshape(
+                    freq_count, int(channel_count / freq_count), element_count), 0, 1), 0, 2) # time by freq by element    
+                
+                #print(datastream)
+               
+def on_error(ws, error):
+    print('#####ERROR#####')
+    print(error)
 
-async def BCI2K_DataConnection(endpoint):
-    if endpoint == 'Source':
-        address = '20100'
-    elif endpoint == 'Processing':
-        address = '20203'
-    async with websockets.connect('ws://localhost:{}'.format(address)) as websocket:
-        stateFormat = await websocket.recv()
-        # print(stateFormat.decode("utf-8"))
-        print("")
-        signalProperties = await websocket.recv()
-        # print(signalProperties.decode("utf-8"))
-        print("")
-        data = await websocket.recv()
-        dv = DataView(data)
-        run_count = 1
-        if data[0] == 4:  # Visualization and Brain Signal Data Format
-            if data[1] == 1:  # Signal
-                if(data[2] == 2):  # float32
-                    # number of channels
-                    channel_count = data[3]
-                    print("Number of channels: {}".format(channel_count))
-                    # print(data[4])  # + 256 channels
-                    # number of elements
-                    element_count = data[5]
-                    print("Number of elements: {}".format(element_count))
-                    # print(data[6])  # + 256 elements
-                    
-                    datastream_buffer = []
-                    if not run_count:
-                        datastream_buffer = datastream # most recent batch
-                        run_count = 0
-                    datastream = []
-                    for ii in range(channel_count*element_count):
-                        datastream.append(dv.get_float_32(7+ii))
+def on_close(ws):
+    print("#####CLOSED#####")
 
-                    datastream = np.array(datastream).reshape(
-                        channel_count, element_count)                    
-                    
-                    # TODO: feed it to model
-                    print('datastream')
-                    print(datastream)
-                    np.save('datastream.npy', datastream)
-                    
-                    if datastream_buffer == []:
-                        processed = preprocess.preprocess(datastream.T, channel_count)
-                    else:
-                        processed = preprocess.preprocess(
-                            np.concatenate((datastream_buffer,datastream),axis=1).T, channel_count)
-                    print('processed')
-                    print(processed)
+def recv_BCI2k(): # producer
+    websocket.enableTrace(True)
+    ws = websocket.WebSocketApp('ws://localhost:20203', #20100
+                              on_message = on_message,
+                              on_error = on_error,
+                              on_close = on_close)
+    ws.run_forever()
 
+def audi_BCI2k():  # delay*16000   
+    pass
 
-while True:
-    asyncio.get_event_loop().run_until_complete(BCI2K_OperatorConnection())
-    asyncio.get_event_loop().run_until_complete(BCI2K_DataConnection('Source'))
-    # asyncio.get_event_loop().run_until_complete(BCI2K_DataConnection('Processing'))
+if __name__ == "__main__":
+    p_audi = multiprocessing.Process(target = audi_BCI2k) # consumer
+    p_audi.start()
+    p_recv = multiprocessing.Process(target = recv_BCI2k) # producer
+    p_recv.start()
+
