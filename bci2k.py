@@ -42,6 +42,9 @@ class DataView:
         binary = self.__get_binary(start_index, bytes_to_read)
         return struct.unpack('<f', binary)[0]  # <f for little endian
 
+def view_message(message, data_size): 
+    return list(struct.unpack(str(data_size)+'f', message))
+
 def on_message(ws, data):
     dv = DataView(data)
     freq_count = 13
@@ -55,9 +58,7 @@ def on_message(ws, data):
                 element_count = data[5] + data[6]*256
                 print("Number of elements: {}".format(element_count))
 
-                datastream = []
-                for ii in range(channel_count*element_count):
-                    datastream.append(dv.get_float_32(7+ii)) 
+                datastream = view_message(data[7:],channel_count*element_count)
 
                 datastream = np.swapaxes(np.swapaxes(np.array(datastream).reshape(
                     freq_count, int(channel_count / freq_count), element_count), 0, 1), 0, 2) # time by freq by element    
